@@ -26,7 +26,7 @@ from connect_sqlite import conectionSQLite, ejecutaScriptSqlite
 
 config = configparser.ConfigParser()
 config.sections()
-config.read('recordatorios.conf')
+config.read('/home/pi/RecordatoriosBot/recordatorios.conf')
 
 db = config['DEFAULTS']['db']
 bot = telebot.TeleBot(config['DEFAULTS']['bot_token'])
@@ -192,13 +192,15 @@ def ejecutar_recordatorio_texto(message):
 def borrar_recordatorios(message):
     mensaje = "Introduce el ID del mensaje a borrar, o los ID separados por coma\n"
     recordatorio = getMsg(message.chat.id)
-    for i in recordatorio:
-        mensaje += "ID: {}, Mensaje: {}\n".format(i["CodMsg"], i["Mensaje"])
-
-    splitted_text = util.split_string(mensaje, 3000)
+    
     if len(recordatorio) == 0:
         bot.reply_to(message, "No tienes recordatorios disponibles")
+        return
     else:
+        for i in recordatorio:
+            mensaje += "ID: {}, Mensaje: {}\n".format(i["CodMsg"], i["Mensaje"])
+
+        splitted_text = util.split_string(mensaje, 3000)
         markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
 
         # imprimos los mensajes con sus ID
@@ -244,12 +246,16 @@ def borrar_recordatorios(message):
 def borrar_recordatorios_step2(message):
     bot.reply_to(message, "En proceso de implementacion")
 
+    if len(message.text) == 0:
+        return
+
     query = "SELECT Mensajes.Mensaje, Mensajes.Adjunto, Mensajes.Activo, Temporizador.fecha, Temporizador.hora, \
                 Mensajes.CodMsg FROM Mensajes \
                 INNER JOIN Usuarios ON Mensajes.CodUser = Usuarios.CodUser \
                 INNER JOIN Temporizador ON Mensajes.CodTemp = Temporizador.CodTemp \
                 WHERE Mensajes.CodMsg LIKE {}".format(message.text)
 
+    print(query)
     respuesta = conectionSQLite(db, query, True)
     if len(respuesta) != 0:
         bot.reply_to(message, "Este es el mensaje que se borrara \n{}".format(respuesta[0]["Mensaje"]))
