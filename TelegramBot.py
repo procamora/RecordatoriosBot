@@ -17,6 +17,8 @@ import datetime
 import time
 import configparser
 import threading
+import urllib
+import logging
 
 import telebot  # Importamos la librería
 from telebot import types  # Y los tipos especiales de esta
@@ -26,10 +28,12 @@ from connect_sqlite import conectionSQLite, ejecutaScriptSqlite
 
 config = configparser.ConfigParser()
 config.sections()
-config.read('/home/pi/RecordatoriosBot/recordatorios.conf')
+config.read('/home/osmc/RecordatoriosBot/recordatorios.conf')
 
-db = config['DEFAULTS']['db']
-bot = telebot.TeleBot(config['DEFAULTS']['bot_token'])
+db = config['OSMC']['db']
+bot = telebot.TeleBot(config['OSMC']['bot_token'])
+
+CANCELAR = "exit"
 
 modo_debug = True
 dicc_botones = {
@@ -78,6 +82,7 @@ def getMsg(codUser):
             WHERE Usuarios.Id LIKE '{}' AND Mensajes.Activo LIKE 1".format(codUser)
 
     respuesta = conectionSQLite(db, query, True)
+    print(respuesta)
     return respuesta
 
 
@@ -96,23 +101,27 @@ def checkUsers(usuario, alias):
 
     return respuesta[0]["CodUser"]
 
+def cancela(message):
+    bot.reply_to(message, "Accion cancelada", reply_markup=markupInicio)
+
+
 
 @bot.message_handler(commands=["start"])
 def command_start(message):
     bot.send_message(message.chat.id, "Bienvenido al bot\nTu id es: {}".format(message.chat.id))
 
-    bot.reply_to(message, "Introduce la hora del recordatorio ", reply_markup=markupInicio)
+    bot.reply_to(message, "Esta es la lista de comandos disponibles", reply_markup=markupInicio)
 
 
 @bot.message_handler(commands=["help"])
 def command_help(message):
-    bot.send_message(message.chat.id, "Aqui pondre todas las opciones")
     markup = types.InlineKeyboardMarkup()
     itembtna = types.InlineKeyboardButton('Github', url="https://github.com/procamora/GRecordatoriosBot")
     itembtnv = types.InlineKeyboardButton('README',
                                           url="https://github.com/procamora/RecordatoriosBot/blob/master/README.md")
     markup.row(itembtna, itembtnv)
-    bot.reply_to(message, "Aqui pondre todas las opciones", reply_markup=markup)
+    #bot.reply_to(message, "La lista de comandos disponibles es:\n/mostrar_recordatorios\n/crear_recordatorio", reply_markup=markup)
+    bot.reply_to(message, "Esta es la lista de comandos disponibles", reply_markup=markupInicio)
 
 
 @bot.message_handler(commands=['mostrar_recordatorios'])
@@ -120,12 +129,18 @@ def mostrar_recordatorios(message):
     # Split the text each 3000 characters.
     # split_string returns a list with the splitted text.
     mensaje = str()
-    for i in getMsg(message.chat.id):
+    consultaSql =  getMsg(message.chat.id)
+    if consultaSql is None:
+        bot.reply_to(message, "No tienes recordatorios pendientes")
+        return
+    
+    # si hay mensajes
+    for i in consultaSql:
         mensaje += "Mensaje: {}, Fecha: {} {}\n".format(i["Mensaje"], i["fecha"], i["hora"])
 
     splitted_text = util.split_string(mensaje, 3000)
     if len(splitted_text) == 0:
-        bot.reply_to(message, "No tienes recordatorios pendientes")
+        bot.reply_to(message, "No tienes recordatorios pendientes", reply_markup=markupInicio)
     else:
         for text in splitted_text:
             bot.reply_to(message, text)
@@ -142,23 +157,33 @@ def crear_recordatorio_fecha(message):
                (datetime.date.today() + datetime.timedelta(days=5)).strftime("%d-%m-%Y"))
     markup.row((datetime.date.today() + datetime.timedelta(days=6)).strftime("%d-%m-%Y"),
                (datetime.date.today() + datetime.timedelta(days=7)).strftime("%d-%m-%Y"))
+    markup.row(CANCELAR)
     msg = bot.reply_to(message, "Introduce la fecha del recordatorio ", reply_markup=markup)
 
     bot.register_next_step_handler(msg, crear_recordatorio_hora)
 
 
 def crear_recordatorio_hora(message):
+    if message.text == CANCELAR: # si exit paramos
+        cancela(message)
+        return
+
     temporizador['fecha'] = message.text
     markup = types.ReplyKeyboardMarkup()
     markup.row("09:00", "11:00")
     markup.row("13:00", "15:00", "18:00")
     markup.row("20:00", "22:00")
+    
     msg = bot.reply_to(message, "Introduce la hora del recordatorio ", reply_markup=markup)
 
     bot.register_next_step_handler(msg, crear_recordatorio_texto)
 
 
 def crear_recordatorio_texto(message):
+    if message.text == CANCELAR: # si exit paramos
+        cancela(message)
+        return
+
     temporizador['hora'] = message.text
     bot.send_message(message.chat.id,
                      "El la fecha a guardar es: {} - {}".format(temporizador['fecha'], temporizador['hora']))
@@ -193,9 +218,10 @@ def borrar_recordatorios(message):
     mensaje = "Introduce el ID del mensaje a borrar, o los ID separados por coma\n"
     recordatorio = getMsg(message.chat.id)
     
-    if len(recordatorio) == 0:
+    if recordatorio is None:
         bot.reply_to(message, "No tienes recordatorios disponibles")
         return
+    
     else:
         for i in recordatorio:
             mensaje += "ID: {}, Mensaje: {}\n".format(i["CodMsg"], i["Mensaje"])
@@ -237,6 +263,7 @@ def borrar_recordatorios(message):
             markup.add(str(recordatorio[0]["CodMsg"]))
         else:
             return
+        markup.row(CANCELAR)
 
         bot.reply_to(message, "Diccionario de IDs", reply_markup=markup)
 
@@ -244,22 +271,41 @@ def borrar_recordatorios(message):
 
 
 def borrar_recordatorios_step2(message):
-    bot.reply_to(message, "En proceso de implementacion")
-
-    if len(message.text) == 0:
+    if message.text == CANCELAR: # si exit paramos
+        cancela(message)
         return
 
-    query = "SELECT Mensajes.Mensaje, Mensajes.Adjunto, Mensajes.Activo, Temporizador.fecha, Temporizador.hora, \
-                Mensajes.CodMsg FROM Mensajes \
+    bot.reply_to(message, "En proceso de implementacion")
+
+    #if len(message.text) == 0: da fallo
+    #    return
+
+    query = "DELETE FROM Mensajes \
+            WHERE Mensaje IN ( \
+                SELECT Mensaje FROM Mensajes \
                 INNER JOIN Usuarios ON Mensajes.CodUser = Usuarios.CodUser \
-                INNER JOIN Temporizador ON Mensajes.CodTemp = Temporizador.CodTemp \
-                WHERE Mensajes.CodMsg LIKE {}".format(message.text)
+                WHERE Usuarios.Id LIKE '{}' AND Mensajes.CodMsg LIKE '{}' )".format(message.chat.id, message.text)
 
-    print(query)
+    #bot.reply_to(message, query)
     respuesta = conectionSQLite(db, query, True)
-    if len(respuesta) != 0:
-        bot.reply_to(message, "Este es el mensaje que se borrara \n{}".format(respuesta[0]["Mensaje"]))
+    bot.reply_to(message, "Mensaje borrado", reply_markup=markupInicio)
+    
+    #if len(respuesta) != 0:
+    #    bot.reply_to(message, "Este es el mensaje que se ha borrado: \n{}".format(respuesta[0]["Mensaje"]))
 
+
+@bot.message_handler(commands=['error'])
+def send_welcome(message):
+    bot.reply_to(message, "Genero una excepcion, sino llega un segundo mensaje es que ha petado :(")
+    raise ValueError('A very specific bad thing happened')
+    bot.reply_to(message, "segundo mensaje :) BIEN!!")
+
+"""
+@bot.message_handler(func=lambda message: True)
+def comando_desconocido(message):
+    bot.reply_to(message, "Comando desconocido, comandos disponibles: ")
+    command_help(message)
+"""
 
 def sacaDatos():
     query = """SELECT Usuarios.Id, Mensajes.Mensaje, Mensajes.Adjunto, Mensajes.Activo, Temporizador.fecha, \
@@ -273,8 +319,8 @@ def sacaDatos():
 
 def checkFecha(fecha, hora):
     """
-    Metodo al que le pasamos una fehca y hora y compruebe si es correcta
-    :return: 
+    Metodo al que le pasamos una fecha/hora para que compruebe si es correcta
+    :return boolean: indicando si la fecha/hora es correcta
     """
 
     if fecha != datetime.datetime.now().date().strftime("%d-%m-%Y"):
@@ -333,6 +379,15 @@ d = threading.Thread(target=daemon, name='Daemon')
 d.setDaemon(True)
 d.start()
 
+logger = telebot.logger
+telebot.logger.setLevel(logging.INFO) # Outputs debug messages to console.
+
 # Con esto, le decimos al bot que siga funcionando incluso si encuentra
 # algun fallo.
-bot.polling(none_stop=True, interval=0, timeout=3)
+try:
+    bot.polling(none_stop=True, interval=0, timeout=3)
+except urllib.error.HTTPError:
+    time.sleep(10)
+
+while True:
+    time.sleep(20)
