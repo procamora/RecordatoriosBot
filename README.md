@@ -18,10 +18,7 @@ CREATE TABLE "Usuarios" (
     `Id`    TEXT UNIQUE,
     `Name`  TEXT
 );
-INSERT INTO `Usuarios` VALUES (4,'33063767','procamora');
-INSERT INTO `Usuarios` VALUES (5,'40522670','None');
-INSERT INTO `Usuarios` VALUES (6,'6775833','arcos');
-INSERT INTO `Usuarios` VALUES (7,'401323530','None');
+
 CREATE TABLE "Temporizador" (
     `CodTemp`   INTEGER NOT NULL,
     `fecha` TEXT NOT NULL,
