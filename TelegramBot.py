@@ -31,11 +31,15 @@ config.sections()
 config.read('/home/osmc/RecordatoriosBot/recordatorios.conf')
 
 db = config['OSMC']['db']
+admin = config['OSMC']['administrador']
+
 bot = telebot.TeleBot(config['OSMC']['bot_token'])
+bot.send_message(admin ,"Inicio servidor")
 
 CANCELAR = "exit"
 
 modo_debug = True
+
 dicc_botones = {
     'mostrar_recordatorios': '/mostrar_recordatorios',
     'crear_recordatorio': '/crear_recordatorio',
@@ -75,8 +79,8 @@ def getCodTemp():
 
 
 def getMsg(codUser):
-    query = "SELECT Mensajes.Mensaje, Mensajes.Adjunto, Mensajes.Activo, Temporizador.fecha, Temporizador.hora, \
-            Mensajes.CodMsg FROM Mensajes \
+    query = "SELECT Usuarios.Name, Usuarios.Id ,Mensajes.Mensaje, Mensajes.Adjunto, \
+            Mensajes.Activo, Temporizador.fecha, Temporizador.hora, Mensajes.CodMsg FROM Mensajes \
             INNER JOIN Usuarios ON Mensajes.CodUser = Usuarios.CodUser \
             INNER JOIN Temporizador ON Mensajes.CodTemp = Temporizador.CodTemp \
             WHERE Usuarios.Id LIKE '{}' AND Mensajes.Activo LIKE 1".format(codUser)
@@ -141,6 +145,35 @@ def mostrar_recordatorios(message):
     splitted_text = util.split_string(mensaje, 3000)
     if len(splitted_text) == 0:
         bot.reply_to(message, "No tienes recordatorios pendientes", reply_markup=markupInicio)
+    else:
+        for text in splitted_text:
+            bot.reply_to(message, text)
+    
+    print(int(message.chat.id) == int(admin))
+    print(message.chat.id)
+    print(admin)
+    if int(message.chat.id) == int(admin):
+        mostrar_recordatorios_admin(message)
+
+
+def mostrar_recordatorios_admin(message):
+    # Split the text each 3000 characters.
+    # split_string returns a list with the splitted text.
+    print("admin")
+    mensaje = str()
+    mensaje += "Mensajes de todos"
+    consultaSql =  getMsg("%") # todos los mensajes
+    if consultaSql is None:
+        bot.reply_to(message, "Nadie tiene recordatorios pendientes")
+        return
+    
+    # si hay mensajes
+    for i in consultaSql:
+        mensaje += "User: {}, ID: {}, Mensaje: {}, Fecha: {} {}\n\n".format(i["Name"], i["Id"], i["Mensaje"], i["fecha"], i["hora"])
+
+    splitted_text = util.split_string(mensaje, 3000)
+    if len(splitted_text) == 0:
+        bot.reply_to(message, "Nadie tiene recordatorios pendientes", reply_markup=markupInicio)
     else:
         for text in splitted_text:
             bot.reply_to(message, text)
@@ -317,7 +350,7 @@ def sacaDatos():
     return conectionSQLite(db, query, True)
 
 
-def checkFecha(fecha, hora):
+def checkFechaHora(fecha, hora):
     """
     Metodo al que le pasamos una fecha/hora para que compruebe si es correcta
     :return boolean: indicando si la fecha/hora es correcta
@@ -332,16 +365,35 @@ def checkFecha(fecha, hora):
     return True
 
 
-def compruebaRecordatoriosAntiguos(fecha, codMsg):
+def compruebaRecordatoriosAntiguos(fecha, hora, codMsg, datos):
     """
     Desabilita todos los recordarorios cuya fecha haya pasado
     """
+    if modo_debug:
+        print("compruebaRecordatoriosAntiguos")
+        print(fecha)
+        print(datetime.datetime.now().date().strftime("%d-%m-%Y"))
+        print(fecha < datetime.datetime.now().date().strftime("%d-%m-%Y"))
+
+        print()
+        print()
+        
+        print(fecha == datetime.datetime.now().date().strftime("%d-%m-%Y"))
+        print(hora)
+        print(datetime.datetime.now().strftime("%H:%M"))
+        print(hora < datetime.datetime.now().strftime("%H:%M"))
 
     activo = True
     if fecha < datetime.datetime.now().date().strftime("%d-%m-%Y"):
         activo = False
+    elif fecha == datetime.datetime.now().date().strftime("%d-%m-%Y") and hora < datetime.datetime.now().strftime("%H:%M"):
+        activo = False
 
     if not activo:
+        bot.send_message("He fallado en mi unica labor, no he podido entregarte este mensaje a tiempo :'(")
+        bot.send_message(datos["Id"], datos["Mensaje"])
+        bot.send_message(admin ,"Mensaje: {} desactualizado".format(codMsg))
+
         query = "UPDATE Mensajes SET Activo=0 WHERE CodMsg LIKE {}".format(codMsg)
         conectionSQLite(db, query)
         if modo_debug:
@@ -349,6 +401,14 @@ def compruebaRecordatoriosAntiguos(fecha, codMsg):
 
 
 def ejecutaRecordatorio(datos):
+    """Envia el mensaje con el recordatorio y desabilita el recordatorio
+    
+    [description]
+    
+    Arguments:
+        datos {[type]} -- [description]
+    """
+
     bot.send_message(datos["Id"], datos["Mensaje"])
     query = "UPDATE Mensajes SET Activo=0 WHERE CodMsg LIKE {}".format(datos["CodMsg"])
     conectionSQLite(db, query)
@@ -364,15 +424,15 @@ def daemon():
     while True:
         for i in sacaDatos():
             print(i)
-            compruebaRecordatoriosAntiguos(i["fecha"], i["CodMsg"])
-            if checkFecha(i["fecha"], i["hora"]):
+            compruebaRecordatoriosAntiguos(i["fecha"], i["hora"], i["CodMsg"], i)
+            if checkFechaHora(i["fecha"], i["hora"]):
                 ejecutaRecordatorio(i)
         print()
         print()
         print()
         print()
         print()
-        time.sleep(30)
+        time.sleep(20)
 
 
 d = threading.Thread(target=daemon, name='Daemon')
