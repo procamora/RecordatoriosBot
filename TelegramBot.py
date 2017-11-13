@@ -19,6 +19,7 @@ import configparser
 import threading
 import urllib
 import logging
+import re
 
 import telebot  # Importamos la librería
 from telebot import types  # Y los tipos especiales de esta
@@ -201,15 +202,20 @@ def crear_recordatorio_hora(message):
         cancela(message)
         return
 
-    temporizador['fecha'] = message.text
-    markup = types.ReplyKeyboardMarkup()
-    markup.row("09:00", "11:00")
-    markup.row("13:00", "15:00", "18:00")
-    markup.row("20:00", "22:00")
-    
-    msg = bot.reply_to(message, "Introduce la hora del recordatorio ", reply_markup=markup)
+    #elif not re.search("^\d{2}\-\d{2}\-\d{4}$", message.text):
+    #    bot.reply_to(message, "Introduce una fecha CORRECTA :(")
+    #    crear_recordatorio_fecha(message)
 
-    bot.register_next_step_handler(msg, crear_recordatorio_texto)
+    else:
+        temporizador['fecha'] = message.text
+        markup = types.ReplyKeyboardMarkup()
+        markup.row("09:00", "11:00")
+        markup.row("13:00", "15:00", "18:00")
+        markup.row("20:00", "22:00")
+        
+        msg = bot.reply_to(message, "Introduce la hora del recordatorio ", reply_markup=markup)
+
+        bot.register_next_step_handler(msg, crear_recordatorio_texto)
 
 
 def crear_recordatorio_texto(message):
@@ -217,12 +223,20 @@ def crear_recordatorio_texto(message):
         cancela(message)
         return
 
-    temporizador['hora'] = message.text
-    bot.send_message(message.chat.id,
-                     "El la fecha a guardar es: {} - {}".format(temporizador['fecha'], temporizador['hora']))
+    #elif not re.search("^\d{2}\:\d{2}$", message.text):
+    #    bot.reply_to(message, "Introduce una hora CORRECTA :(")
+    #    crear_recordatorio_hora(message)
 
-    bot.reply_to(message, "Introduce el mensaje a guardar")
-    bot.register_next_step_handler(message, ejecutar_recordatorio_texto)
+    else:
+        temporizador['hora'] = message.text
+        bot.send_message(message.chat.id,
+                         "El la fecha a guardar es: {} - {}".format(temporizador['fecha'], temporizador['hora']))
+
+        markup = types.ReplyKeyboardMarkup()
+        markup.row("Ir a comprar", "Tirar la basura")
+        markup.row("Clase", "Tarea", "Estudiar")
+        bot.reply_to(message, "Introduce el mensaje a guardar", reply_markup=markup)
+        bot.register_next_step_handler(message, ejecutar_recordatorio_texto)
 
 
 def ejecutar_recordatorio_texto(message):
@@ -236,7 +250,7 @@ def ejecutar_recordatorio_texto(message):
     if userID is not None:
         query = "INSERT INTO Temporizador (CodTemp, fecha, hora) VALUES ({}, '{}', '{}');\n \
                 ".format(nextCodTemp, temporizador['fecha'], temporizador['hora'])
-        # adjuntos de momento no lo uso
+        # FIXME adjuntos de momento no lo uso
         query += "INSERT INTO Mensajes (CodMsg, CodUser, CodTemp, Mensaje) VALUES ({}, {}, {}, '{}') \
                  ".format(nextCodMsg, userID, nextCodTemp, message.text)
         if modo_debug:
@@ -390,7 +404,7 @@ def compruebaRecordatoriosAntiguos(fecha, hora, codMsg, datos):
         activo = False
 
     if not activo:
-        bot.send_message("He fallado en mi unica labor, no he podido entregarte este mensaje a tiempo :'(")
+        bot.send_message(datos["Id"], "He fallado en mi unica labor, no he podido entregarte este mensaje a tiempo :'(")
         bot.send_message(datos["Id"], datos["Mensaje"])
         bot.send_message(admin ,"Mensaje: {} desactualizado".format(codMsg))
 
