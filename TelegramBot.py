@@ -29,13 +29,13 @@ from connect_sqlite import conectionSQLite, ejecutaScriptSqlite
 
 config = configparser.ConfigParser()
 config.sections()
-config.read('/home/osmc/RecordatoriosBot/recordatorios.conf')
+config.read('/home/pi/RecordatoriosBot/recordatorios.conf')
 
-db = config['OSMC']['db']
-admin = config['OSMC']['administrador']
+db = config['PI']['db']
+admin = config['PI']['administrador']
 
-bot = telebot.TeleBot(config['OSMC']['bot_token'])
-bot.send_message(admin ,"Inicio servidor")
+bot = telebot.TeleBot(config['PI']['bot_token'])
+#bot.send_message(admin ,"Inicio servidor")
 
 CANCELAR = "exit"
 
@@ -54,6 +54,13 @@ temporizador = {
     'hora': str(),
     'msg': str()
 }
+
+mensajeHelp = "Si vas a crear una crear un recordatorio con una fecha u hora que no aparezca en \
+los botones sigue esta estructura:\nfecha: dd-mm-yyyy Ejemplo: 09-12-2017\n hora: hh:mm \
+Ejemplo: 16:00.\nEl bot esta en desarrollo por lo que puede tener fallos, no me hago responsable si \
+falla a la hora de recordate algo."
+
+
 
 markupInicio = types.ReplyKeyboardMarkup(one_time_keyboard=False)
 markupInicio.row(dicc_botones["mostrar_recordatorios"], dicc_botones["borrar_recordatorio"])
@@ -115,6 +122,7 @@ def cancela(message):
 def command_start(message):
     bot.send_message(message.chat.id, "Bienvenido al bot\nTu id es: {}".format(message.chat.id))
 
+    bot.reply_to(message, mensajeHelp)
     bot.reply_to(message, "Esta es la lista de comandos disponibles", reply_markup=markupInicio)
 
 
@@ -126,6 +134,7 @@ def command_help(message):
                                           url="https://github.com/procamora/RecordatoriosBot/blob/master/README.md")
     markup.row(itembtna, itembtnv)
     #bot.reply_to(message, "La lista de comandos disponibles es:\n/mostrar_recordatorios\n/crear_recordatorio", reply_markup=markup)
+    bot.reply_to(message, "He sido creado por @procamora\n{}".format(mensajeHelp))
     bot.reply_to(message, "Esta es la lista de comandos disponibles", reply_markup=markupInicio)
 
 
@@ -162,7 +171,7 @@ def mostrar_recordatorios_admin(message):
     # split_string returns a list with the splitted text.
     print("admin")
     mensaje = str()
-    mensaje += "Mensajes de todos"
+    mensaje += "Mensajes de todos:\n"
     consultaSql =  getMsg("%") # todos los mensajes
     if consultaSql is None:
         bot.reply_to(message, "Nadie tiene recordatorios pendientes")
@@ -194,20 +203,33 @@ def crear_recordatorio_fecha(message):
     markup.row(CANCELAR)
     msg = bot.reply_to(message, "Introduce la fecha del recordatorio ", reply_markup=markup)
 
-    bot.register_next_step_handler(msg, crear_recordatorio_hora)
+    bot.register_next_step_handler(msg, crear_recordatorio_hora, True)
 
 
-def crear_recordatorio_hora(message):
+def crear_recordatorio_hora(message, isRecordatorioFecha):
+    """
+    Metodo que parsea la hora del recordatorio, esta funcion es llamada desde crear_recordatorio_fecha donde tiene que 
+    ejecutarse con normalidad preguntando por la hora o desde crear_recordatorio_texto que su unica funcion es 
+    volver a llamar a crear_recordatorio_texto para que vuelva a introducir la hora correctamente
+    
+    :isRecordatorioFecha: Variable booleanda que indica si la funcion es llamada desde crear_recordatorio_fecha
+    :return:
+    """
+
     if message.text == CANCELAR: # si exit paramos
         cancela(message)
         return
 
-    #elif not re.search("^\d{2}\-\d{2}\-\d{4}$", message.text):
-    #    bot.reply_to(message, "Introduce una fecha CORRECTA :(")
-    #    crear_recordatorio_fecha(message)
+    elif not isRecordatorioFecha:
+        bot.register_next_step_handler(message, crear_recordatorio_texto)
+        return
+
+    elif not re.match(r"^\d+\-\d+\-\d+$", message.text):
+        bot.reply_to(message, "Introduce una fecha CORRECTA :(")
+        crear_recordatorio_fecha(message)
 
     else:
-        temporizador['fecha'] = message.text
+        temporizador['fecha'] = message.text.replace("/", "-")
         markup = types.ReplyKeyboardMarkup()
         markup.row("09:00", "11:00")
         markup.row("13:00", "15:00", "18:00")
@@ -223,9 +245,9 @@ def crear_recordatorio_texto(message):
         cancela(message)
         return
 
-    #elif not re.search("^\d{2}\:\d{2}$", message.text):
-    #    bot.reply_to(message, "Introduce una hora CORRECTA :(")
-    #    crear_recordatorio_hora(message)
+    elif not re.search(r"^\d+\:\d+$", message.text):
+        bot.reply_to(message, "Introduce una hora CORRECTA :(")
+        crear_recordatorio_hora(message, False)
 
     else:
         temporizador['hora'] = message.text
@@ -383,35 +405,44 @@ def compruebaRecordatoriosAntiguos(fecha, hora, codMsg, datos):
     """
     Desabilita todos los recordarorios cuya fecha haya pasado
     """
-    if modo_debug:
-        print("compruebaRecordatoriosAntiguos")
-        print(fecha)
-        print(datetime.datetime.now().date().strftime("%d-%m-%Y"))
-        print(fecha < datetime.datetime.now().date().strftime("%d-%m-%Y"))
 
-        print()
-        print()
-        
-        print(fecha == datetime.datetime.now().date().strftime("%d-%m-%Y"))
-        print(hora)
-        print(datetime.datetime.now().strftime("%H:%M"))
-        print(hora < datetime.datetime.now().strftime("%H:%M"))
+    try:
+        actual = datetime.datetime.now().date()
+        fecha_actual = datetime.datetime(actual.year, actual.month, actual.day)
+        fecha_final = datetime.datetime.strptime(fecha, "%d-%m-%Y")
 
-    activo = True
-    if fecha < datetime.datetime.now().date().strftime("%d-%m-%Y"):
-        activo = False
-    elif fecha == datetime.datetime.now().date().strftime("%d-%m-%Y") and hora < datetime.datetime.now().strftime("%H:%M"):
-        activo = False
+        if modo_debug:
+            print("compruebaRecordatoriosAntiguos")
+            print(fecha_actual)
+            print(fecha_final)
+            print(fecha_final < fecha_actual)
 
-    if not activo:
+        activo = True
+        if fecha_final < fecha_actual:
+            activo = False
+        elif  fecha_final == fecha_actual and hora < datetime.datetime.now().strftime("%H:%M"):
+            activo = False
+
+        if not activo:
+            query = "UPDATE Mensajes SET Activo=0 WHERE CodMsg LIKE {}".format(codMsg)
+            conectionSQLite(db, query)
+            if modo_debug:
+                print(query)
+
+            bot.send_message(datos["Id"], "He fallado en mi unica labor, no he podido entregarte este mensaje a tiempo :'(")
+            bot.send_message(datos["Id"], datos["Mensaje"])
+            bot.send_message(admin ,"Mensaje: {} desactualizado".format(codMsg))
+
+    except: # sino conseguimos parsear el mensaje lo desactivamos
+        query = "UPDATE Mensajes SET Activo=0 WHERE CodMsg LIKE {}".format(codMsg)
+        conectionSQLite(db, query)
+
+        if modo_debug:
+            print(query)
+
         bot.send_message(datos["Id"], "He fallado en mi unica labor, no he podido entregarte este mensaje a tiempo :'(")
         bot.send_message(datos["Id"], datos["Mensaje"])
         bot.send_message(admin ,"Mensaje: {} desactualizado".format(codMsg))
-
-        query = "UPDATE Mensajes SET Activo=0 WHERE CodMsg LIKE {}".format(codMsg)
-        conectionSQLite(db, query)
-        if modo_debug:
-            print(query)
 
 
 def ejecutaRecordatorio(datos):
@@ -438,14 +469,12 @@ def daemon():
     while True:
         for i in sacaDatos():
             print(i)
-            compruebaRecordatoriosAntiguos(i["fecha"], i["hora"], i["CodMsg"], i)
-            if checkFechaHora(i["fecha"], i["hora"]):
-                ejecutaRecordatorio(i)
-        print()
-        print()
-        print()
-        print()
-        print()
+            try:
+                compruebaRecordatoriosAntiguos(i["fecha"], i["hora"], i["CodMsg"], i)
+                if checkFechaHora(i["fecha"], i["hora"]):
+                    ejecutaRecordatorio(i)
+            except:
+                pass
         time.sleep(20)
 
 
